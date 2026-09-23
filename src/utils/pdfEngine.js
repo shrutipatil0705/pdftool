@@ -150,32 +150,46 @@ export async function extractPdfPages(file, pageRangeStr) {
 }
 
 /**
- * Converts JPG/PNG/WEBP images into a PDF document
+ * Converts a single image file to a PDF Blob
+ */
+async function imageToPdfBlob(file) {
+  const pdfDoc = await PDFDocument.create();
+  const arrayBuffer = await file.arrayBuffer();
+  let image;
+  if (file.type.includes('png')) {
+    image = await pdfDoc.embedPng(arrayBuffer);
+  } else {
+    image = await pdfDoc.embedJpg(arrayBuffer);
+  }
+  const page = pdfDoc.addPage([image.width, image.height]);
+  page.drawImage(image, { x: 0, y: 0, width: image.width, height: image.height });
+  const pdfBytes = await pdfDoc.save();
+  return new Blob([pdfBytes], { type: 'application/pdf' });
+}
+
+/**
+ * Converts JPG/PNG/WEBP images into PDF(s).
+ * - Single image  → direct PDF download
+ * - Multiple images (bulk) → ZIP containing one PDF per image
  */
 export async function convertImagesToPdf(imageFiles) {
-  const pdfDoc = await PDFDocument.create();
-
-  for (const file of imageFiles) {
-    const arrayBuffer = await file.arrayBuffer();
-    let image;
-    if (file.type.includes('png')) {
-      image = await pdfDoc.embedPng(arrayBuffer);
-    } else {
-      image = await pdfDoc.embedJpg(arrayBuffer);
+  if (imageFiles.length === 1) {
+    // Single image → direct PDF download
+    const blob = await imageToPdfBlob(imageFiles[0]);
+    const baseName = imageFiles[0].name.replace(/\.[^.]+$/, '');
+    saveAs(blob, `${baseName}.pdf`);
+  } else {
+    // Bulk → one PDF per image, all bundled in a ZIP
+    const zip = new JSZip();
+    for (const file of imageFiles) {
+      const blob = await imageToPdfBlob(file);
+      const baseName = file.name.replace(/\.[^.]+$/, '');
+      const arrayBuf = await blob.arrayBuffer();
+      zip.file(`${baseName}.pdf`, arrayBuf);
     }
-
-    const page = pdfDoc.addPage([image.width, image.height]);
-    page.drawImage(image, {
-      x: 0,
-      y: 0,
-      width: image.width,
-      height: image.height,
-    });
+    const zipBlob = await zip.generateAsync({ type: 'blob' });
+    saveAs(zipBlob, 'images_converted.zip');
   }
-
-  const pdfBytes = await pdfDoc.save();
-  const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-  saveAs(blob, 'images_converted.pdf');
 }
 
 /**
